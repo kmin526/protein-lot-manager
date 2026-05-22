@@ -43,7 +43,7 @@ const newLotTemplate = (tempId = '') => ({
   intermediateName: 'His-TEV FAM19A5',
   proteinName: 'rcFAM19A5',
   expressionSystem: 'Expi293F',
-  status: 'In Progress', // 'In Progress' | 'QC Passed' | 'QC Failed' | 'Released'
+  status: 'In Progress', // 'In Progress' | 'Released'
   createdAt: todayISO(),
   updatedAt: todayISO(),
   operator: '',
@@ -581,8 +581,7 @@ function ListView({ lots, allCount, searchTerm, setSearchTerm, statusFilter, set
   const stats = {
     total: allCount,
     inProgress: lots.filter(l => l.status === 'In Progress').length,
-    passed: lots.filter(l => l.status === 'QC Passed' || l.status === 'Released').length,
-    failed: lots.filter(l => l.status === 'QC Failed').length
+    released: lots.filter(l => l.status === 'Released').length,
   };
 
   return (
@@ -596,8 +595,7 @@ function ListView({ lots, allCount, searchTerm, setSearchTerm, statusFilter, set
       }}>
         <StatCard label="전체 LOT" value={stats.total} icon={Layers} color="#3b82f6" />
         <StatCard label="진행 중" value={stats.inProgress} icon={Clock} color="#f59e0b" />
-        <StatCard label="QC 합격" value={stats.passed} icon={CheckCircle2} color="#22c55e" />
-        <StatCard label="QC 불합격" value={stats.failed} icon={AlertCircle} color="#ef4444" />
+        <StatCard label="출시됨" value={stats.released} icon={CheckCircle2} color="#22c55e" />
       </div>
 
       {/* Toolbar */}
@@ -645,8 +643,6 @@ function ListView({ lots, allCount, searchTerm, setSearchTerm, statusFilter, set
         >
           <option>All</option>
           <option>In Progress</option>
-          <option>QC Passed</option>
-          <option>QC Failed</option>
           <option>Released</option>
         </select>
         <button
@@ -1204,8 +1200,6 @@ function DetailView({ lot, onSave, onBack, onDelete }) {
                   style={{ ...inputStyle, padding: '8px 12px', width: 'auto', marginBottom: 0 }}
                 >
                   <option>In Progress</option>
-                  <option>QC Passed</option>
-                  <option>QC Failed</option>
                   <option>Released</option>
                 </select>
                 <div style={{ display: 'flex', gap: 8 }}>
@@ -1365,10 +1359,10 @@ function AssignLotModal({ type, tempId, existingLot, onCancel, onConfirm }) {
     readinessMsg = '중간체 LOT은 1차 농축 & buffer exchange 완료 후 부여하는 것을 권장합니다.';
   } else {
     const secondConcDone = !!existingLot.concentration?.second?.totalYield_mg;
-    const qcPassed = existingLot.status === 'QC Passed' || existingLot.status === 'Released';
-    readinessOK = secondConcDone && qcPassed;
-    currentStage = !secondConcDone ? '2차 농축 미완료' : !qcPassed ? `QC 미통과 (${existingLot.status})` : 'QC 통과';
-    readinessMsg = '최종 LOT은 2차 농축 완료 및 QC Passed 상태에서 부여하는 것을 권장합니다.';
+    const isReleased = existingLot.status === 'Released';
+    readinessOK = secondConcDone && isReleased;
+    currentStage = !secondConcDone ? '2차 농축 미완료' : !isReleased ? `미출시 (${existingLot.status})` : '출시됨';
+    readinessMsg = '최종 LOT은 2차 농축 완료 및 Released 상태에서 부여하는 것을 권장합니다.';
   }
 
   const color = isIntermediate
