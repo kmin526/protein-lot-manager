@@ -39,6 +39,7 @@ const newLotTemplate = (tempId = '') => ({
   lotNumberAssignedAt: '',
   lotNumberAssignedBy: '',
 
+  stagesDone: {} as Record<string, boolean>, // 수동 진행 단계 override
   intermediateName: 'His-TEV FAM19A5',
   proteinName: 'rcFAM19A5',
   expressionSystem: 'Expi293F',
@@ -146,6 +147,24 @@ const newLotTemplate = (tempId = '') => ({
     notes: ''
   }
 });
+
+// 7단계 진행 정의 — LotCard·OverviewTab에서 공유
+const STAGES = [
+  { key: 'production',   label: '생산 (Harvest)',     auto: (l: any) => !!l.production?.harvestDate },
+  { key: 'purification', label: 'Ni-NTA 정제',         auto: (l: any) => !!l.purification?.purificationDate },
+  { key: 'conc1',        label: '1차 농축',            auto: (l: any) => !!(l.concentration?.first?.endDate || l.concentration?.first?.startDate) },
+  { key: 'tevCleavage',  label: 'TEV Cleavage',       auto: (l: any) => !!l.tevCleavage?.date },
+  { key: 'conc2',        label: '2차 농축',            auto: (l: any) => !!(l.concentration?.second?.endDate || l.concentration?.second?.startDate) },
+  { key: 'qcBasic',      label: 'QC (Coomassie/WB)', auto: (l: any) => !!(l.qc?.coomassie?.date || l.qc?.westernBlot?.date) },
+  { key: 'qcElisa',      label: 'ELISA 분석',          auto: (l: any) => !!l.qc?.elisa?.date },
+];
+
+// stagesDone[key]: true/false = 수동 고정, null/undefined = 날짜 데이터로 자동 감지
+const getEffectiveStages = (lot: any): boolean[] =>
+  STAGES.map(s => {
+    const manual = lot.stagesDone?.[s.key];
+    return (manual !== null && manual !== undefined) ? Boolean(manual) : s.auto(lot);
+  });
 
 const STATUS_STYLES = {
   'In Progress': { bg: '#fef3c7', text: '#92400e', dot: '#f59e0b', icon: Clock },
@@ -706,16 +725,7 @@ function LotCard({ lot, onClick }) {
   const style = STATUS_STYLES[lot.status] || STATUS_STYLES['In Progress'];
   const StatusIcon = style.icon;
 
-  // Progress estimate
-  const stages = [
-    !!lot.production?.harvestDate,
-    !!lot.purification?.purificationDate,
-    !!(lot.concentration?.first?.endDate || lot.concentration?.first?.startDate),
-    !!lot.tevCleavage?.date,
-    !!(lot.concentration?.second?.endDate || lot.concentration?.second?.startDate),
-    !!lot.qc?.coomassie?.date || !!lot.qc?.westernBlot?.date,
-    !!lot.qc?.elisa?.date
-  ];
+  const stages = getEffectiveStages(lot);
   const progress = Math.round((stages.filter(Boolean).length / stages.length) * 100);
 
   return (
@@ -1620,6 +1630,94 @@ function OverviewTab({ lot, editing, update }) {
           <Metric label="Coomassie 분석" value={lot.qc?.coomassie?.date ? lot.qc.coomassie.date : '—'} />
           <Metric label="ELISA 분석" value={lot.qc?.elisa?.date ? lot.qc.elisa.date : '—'} />
         </FormGrid>
+      </div>
+
+      {/* 진행 단계 체크박스 */}
+      <div style={{ marginTop: 20, padding: 16, background: '#f8fafc', borderRadius: 12, border: '1px solid #e2e8f0' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+          <SectionTitle icon={Activity}>진행 단계</SectionTitle>
+          {editing && (
+            <button
+              onClick={() => update('stagesDone', {})}
+              style={{ fontSize: 11, color: '#64748b', padding: '3px 8px', border: '1px solid #e2e8f0', borderRadius: 6, background: 'white' }}
+            >
+              전체 자동 감지로 초기화
+            </button>
+          )}
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {STAGES.map((stage, i) => {
+            const autoVal = stage.auto(lot);
+            const manual = lot.stagesDone?.[stage.key];
+            const isManual = manual !== null && manual !== undefined;
+            const effective = isManual ? Boolean(manual) : autoVal;
+
+            return (
+              <div key={stage.key} style={{
+                display: 'flex', alignItems: 'center', gap: 10,
+                padding: '8px 12px',
+                background: 'white',
+                borderRadius: 8,
+                border: `1px solid ${effective ? '#bbf7d0' : '#e2e8f0'}`,
+                opacity: effective ? 1 : 0.65
+              }}>
+                {/* 체크박스 */}
+                {editing ? (
+                  <input
+                    type="checkbox"
+                    checked={effective}
+                    onChange={e => update(`stagesDone.${stage.key}`, e.target.checked)}
+                    style={{ width: 16, height: 16, accentColor: '#22c55e', cursor: 'pointer', flexShrink: 0 }}
+                  />
+                ) : (
+                  <div style={{
+                    width: 18, height: 18, borderRadius: 4, flexShrink: 0,
+                    background: effective ? '#22c55e' : '#e2e8f0',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center'
+                  }}>
+                    {effective && <CheckCircle2 size={12} color="white" />}
+                  </div>
+                )}
+
+                {/* 단계 번호 */}
+                <span style={{ fontSize: 11, fontWeight: 700, color: '#94a3b8', width: 16, flexShrink: 0 }}>
+                  {i + 1}
+                </span>
+
+                {/* 단계명 */}
+                <span style={{ fontSize: 13, fontWeight: 500, color: '#334155', flex: 1 }}>
+                  {stage.label}
+                </span>
+
+                {/* 자동/수동 배지 */}
+                {isManual ? (
+                  <span style={{
+                    fontSize: 10, fontWeight: 700, padding: '2px 6px',
+                    background: '#fef3c7', color: '#92400e', borderRadius: 4
+                  }}>수동</span>
+                ) : (
+                  <span style={{
+                    fontSize: 10, fontWeight: 600, padding: '2px 6px',
+                    background: '#f1f5f9', color: '#94a3b8', borderRadius: 4
+                  }}>자동</span>
+                )}
+
+                {/* 수동 설정 시 초기화 버튼 */}
+                {editing && isManual && (
+                  <button
+                    onClick={() => {
+                      const next = { ...(lot.stagesDone || {}) };
+                      delete next[stage.key];
+                      update('stagesDone', next);
+                    }}
+                    style={{ fontSize: 11, color: '#94a3b8', padding: '1px 5px', border: '1px solid #e2e8f0', borderRadius: 4, background: 'white' }}
+                    title="자동 감지로 되돌리기"
+                  >×</button>
+                )}
+              </div>
+            );
+          })}
+        </div>
       </div>
     </div>
   );
