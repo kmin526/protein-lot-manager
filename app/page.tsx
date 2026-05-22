@@ -1634,18 +1634,20 @@ function OverviewTab({ lot, editing, update }) {
 
       {/* 진행 단계 체크박스 */}
       <div style={{ marginTop: 20, padding: 16, background: '#f8fafc', borderRadius: 12, border: '1px solid #e2e8f0' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-          <SectionTitle icon={Activity}>진행 단계</SectionTitle>
-          {editing && (
+        <SectionTitle icon={Activity}>진행 단계</SectionTitle>
+        <p style={{ margin: '0 0 12px', fontSize: 12, color: '#64748b', lineHeight: 1.6 }}>
+          각 탭에서 날짜를 입력하면 자동으로 ✓ 체크됩니다.<br />
+          날짜 정보가 없는 과거 LOT은 <strong>편집 모드</strong>에서 직접 체크/해제할 수 있습니다.
+          {editing && lot.stagesDone && Object.keys(lot.stagesDone).length > 0 && (
             <button
               onClick={() => update('stagesDone', {})}
-              style={{ fontSize: 11, color: '#64748b', padding: '3px 8px', border: '1px solid #e2e8f0', borderRadius: 6, background: 'white' }}
+              style={{ marginLeft: 10, fontSize: 11, color: '#94a3b8', padding: '2px 7px', border: '1px solid #e2e8f0', borderRadius: 5, background: 'white', verticalAlign: 'middle' }}
             >
-              전체 자동 감지로 초기화
+              전체 초기화
             </button>
           )}
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        </p>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           {STAGES.map((stage, i) => {
             const autoVal = stage.auto(lot);
             const manual = lot.stagesDone?.[stage.key];
@@ -1659,9 +1661,8 @@ function OverviewTab({ lot, editing, update }) {
                 background: 'white',
                 borderRadius: 8,
                 border: `1px solid ${effective ? '#bbf7d0' : '#e2e8f0'}`,
-                opacity: effective ? 1 : 0.65
+                opacity: effective ? 1 : 0.6
               }}>
-                {/* 체크박스 */}
                 {editing ? (
                   <input
                     type="checkbox"
@@ -1679,40 +1680,30 @@ function OverviewTab({ lot, editing, update }) {
                   </div>
                 )}
 
-                {/* 단계 번호 */}
                 <span style={{ fontSize: 11, fontWeight: 700, color: '#94a3b8', width: 16, flexShrink: 0 }}>
                   {i + 1}
                 </span>
 
-                {/* 단계명 */}
                 <span style={{ fontSize: 13, fontWeight: 500, color: '#334155', flex: 1 }}>
                   {stage.label}
                 </span>
 
-                {/* 자동/수동 배지 */}
-                {isManual ? (
-                  <span style={{
-                    fontSize: 10, fontWeight: 700, padding: '2px 6px',
-                    background: '#fef3c7', color: '#92400e', borderRadius: 4
-                  }}>수동</span>
-                ) : (
-                  <span style={{
-                    fontSize: 10, fontWeight: 600, padding: '2px 6px',
-                    background: '#f1f5f9', color: '#94a3b8', borderRadius: 4
-                  }}>자동</span>
-                )}
-
-                {/* 수동 설정 시 초기화 버튼 */}
-                {editing && isManual && (
-                  <button
-                    onClick={() => {
-                      const next = { ...(lot.stagesDone || {}) };
-                      delete next[stage.key];
-                      update('stagesDone', next);
-                    }}
-                    style={{ fontSize: 11, color: '#94a3b8', padding: '1px 5px', border: '1px solid #e2e8f0', borderRadius: 4, background: 'white' }}
-                    title="자동 감지로 되돌리기"
-                  >×</button>
+                {/* 직접 설정된 경우에만 연필 아이콘 + 되돌리기 표시 */}
+                {isManual && (
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <Edit3 size={11} color="#f59e0b" />
+                    {editing && (
+                      <button
+                        onClick={() => {
+                          const next = { ...(lot.stagesDone || {}) };
+                          delete next[stage.key];
+                          update('stagesDone', next);
+                        }}
+                        style={{ fontSize: 10, color: '#94a3b8', padding: '1px 5px', border: '1px solid #e2e8f0', borderRadius: 4, background: 'white' }}
+                        title="날짜 기반으로 되돌리기"
+                      >되돌리기</button>
+                    )}
+                  </span>
                 )}
               </div>
             );
