@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 
 import { supabase } from '@/lib/supabase';
 
@@ -114,26 +114,26 @@ const newLotTemplate = (tempId = '') => ({
     coomassie: {
       date: '',
       notes: '',
-      intermediate: { imageDataUrl: '' },
-      final:        { imageDataUrl: '' }
+      intermediate: { imageUrls: [] as string[] },
+      final:        { imageUrls: [] as string[] }
     },
     westernBlot: {
       date: '',
       notes: '',
-      intermediate: { imageDataUrl: '' },
-      final:        { imageDataUrl: '' }
+      intermediate: { imageUrls: [] as string[] },
+      final:        { imageUrls: [] as string[] }
     },
     concentrationQC: {
       date: '',
       notes: '',
-      intermediate: { imageDataUrl: '' },
-      final:        { imageDataUrl: '' }
+      intermediate: { imageUrls: [] as string[] },
+      final:        { imageUrls: [] as string[] }
     },
     elisa: {
       date: '',
       notes: '',
-      intermediate: { imageDataUrl: '' },
-      final:        { imageDataUrl: '' }
+      intermediate: { imageUrls: [] as string[] },
+      final:        { imageUrls: [] as string[] }
     }
   },
 
@@ -209,48 +209,31 @@ function migrateLot(lot) {
     }
   }
 
-  // QC migration: 옛 구조(여러 필드) → 새 구조(날짜+노트+이미지만)
+  // QC migration: 모든 구조 → 최신 구조(날짜+노트+imageUrls 배열)로 정규화
   if (migrated.qc) {
-    // coomassie
-    const c = migrated.qc.coomassie;
-    if (c && (!c.intermediate || c.intermediate.loadingAmounts_ug !== undefined)) {
-      migrated.qc.coomassie = {
-        date: c.date || '',
-        notes: c.notes || '',
-        intermediate: { imageDataUrl: c.intermediate?.imageDataUrl || '' },
-        final: { imageDataUrl: c.final?.imageDataUrl || c.imageDataUrl || '' }
+    // 단일 URL/base64 문자열 → 배열로 변환하는 헬퍼
+    const toUrlArray = (sample: any, altFinalKey?: string, entry?: any): string[] => {
+      if (!sample) return [];
+      // 이미 배열이면 그대로
+      if (Array.isArray(sample.imageUrls)) return sample.imageUrls.filter(Boolean);
+      // imageUrl (단일) → 배열
+      const single = sample.imageUrl || sample.imageDataUrl || (altFinalKey && entry?.[altFinalKey]) || '';
+      return single ? [single] : [];
+    };
+
+    const migrateQcEntry = (entry: any, altDate?: string, altFinal?: string) => {
+      if (!entry) return entry;
+      return {
+        date: (altDate && entry[altDate]) || entry.date || '',
+        notes: entry.notes || '',
+        intermediate: { imageUrls: toUrlArray(entry.intermediate) },
+        final:        { imageUrls: toUrlArray(entry.final, altFinal, entry) }
       };
-    }
-    // westernBlot
-    const w = migrated.qc.westernBlot;
-    if (w && (!w.intermediate || w.intermediate.loadingAmounts_ug !== undefined)) {
-      migrated.qc.westernBlot = {
-        date: w.date || '',
-        notes: w.notes || '',
-        intermediate: { imageDataUrl: w.intermediate?.imageDataUrl || '' },
-        final: { imageDataUrl: w.final?.imageDataUrl || w.imageDataUrl || '' }
-      };
-    }
-    // concentrationQC
-    const cq = migrated.qc.concentrationQC;
-    if (cq && (!cq.intermediate || cq.intermediate.a280 !== undefined)) {
-      migrated.qc.concentrationQC = {
-        date: cq.measuredDate || cq.date || '',
-        notes: cq.notes || '',
-        intermediate: { imageDataUrl: cq.intermediate?.imageDataUrl || '' },
-        final: { imageDataUrl: cq.final?.imageDataUrl || '' }
-      };
-    }
-    // elisa
-    const e = migrated.qc.elisa;
-    if (e && (!e.intermediate || e.intermediate.ec50_pg_mL !== undefined)) {
-      migrated.qc.elisa = {
-        date: e.date || '',
-        notes: e.notes || '',
-        intermediate: { imageDataUrl: e.intermediate?.imageDataUrl || '' },
-        final: { imageDataUrl: e.final?.imageDataUrl || e.standardCurveImageDataUrl || '' }
-      };
-    }
+    };
+    migrated.qc.coomassie       = migrateQcEntry(migrated.qc.coomassie,       undefined,       'imageDataUrl');
+    migrated.qc.westernBlot     = migrateQcEntry(migrated.qc.westernBlot,     undefined,       'imageDataUrl');
+    migrated.qc.concentrationQC = migrateQcEntry(migrated.qc.concentrationQC, 'measuredDate');
+    migrated.qc.elisa           = migrateQcEntry(migrated.qc.elisa,           undefined,       'standardCurveImageDataUrl');
   }
 
   return migrated;
@@ -265,6 +248,7 @@ export default function ProteinLotManager() {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
   const [toast, setToast] = useState(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
  // Load on mount
   useEffect(() => {
@@ -291,8 +275,9 @@ export default function ProteinLotManager() {
   }, []);
 
   const showToast = (msg, type = 'success') => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
     setToast({ msg, type });
-    setTimeout(() => setToast(null), 2500);
+    toastTimer.current = setTimeout(() => setToast(null), 2500);
   };
 
   
@@ -375,6 +360,10 @@ export default function ProteinLotManager() {
 
   const selectedLot = lots.find(l => l.id === selectedLotId);
 
+  const intermediateCount = lots.filter(l => l.intermediateLotNumber).length;
+  const finalCount = lots.filter(l => l.lotNumber).length;
+  const pendingCount = lots.filter(l => !l.lotNumber && !l.intermediateLotNumber).length;
+
   // ============== Render ==============
   return (
     <div style={{
@@ -383,16 +372,6 @@ export default function ProteinLotManager() {
       background: 'linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%)',
       color: '#0f172a'
     }}>
-      <style>{`
-        * { box-sizing: border-box; }
-        button { font-family: inherit; cursor: pointer; border: none; background: none; }
-        input, textarea, select { font-family: inherit; }
-        .scroll-area::-webkit-scrollbar { width: 8px; height: 8px; }
-        .scroll-area::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
-        @keyframes slideIn { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
-        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-      `}</style>
-
       {/* Header */}
       <header style={{
         background: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)',
@@ -428,11 +407,11 @@ export default function ProteinLotManager() {
               color: '#cbd5e1',
               display: 'flex', gap: 10, flexWrap: 'wrap'
             }}>
-              <span>중간체: <strong style={{ color: '#c4b5fd' }}>{lots.filter(l => l.intermediateLotNumber).length}</strong></span>
+              <span>중간체: <strong style={{ color: '#c4b5fd' }}>{intermediateCount}</strong></span>
               <span style={{ color: '#475569' }}>·</span>
-              <span>최종: <strong style={{ color: '#67e8f9' }}>{lots.filter(l => l.lotNumber).length}</strong></span>
+              <span>최종: <strong style={{ color: '#67e8f9' }}>{finalCount}</strong></span>
               <span style={{ color: '#475569' }}>·</span>
-              <span>진행 중: <strong style={{ color: '#fbbf24' }}>{lots.filter(l => !l.lotNumber && !l.intermediateLotNumber).length}</strong></span>
+              <span>진행 중: <strong style={{ color: '#fbbf24' }}>{pendingCount}</strong></span>
             </div>
           </div>
         </div>
@@ -985,12 +964,15 @@ function DetailView({ lot, onSave, onBack, onDelete }) {
     setLotModalType(null);
   };
 
-  const update = (path, value) => {
+  const update = (path: string, value: any) => {
     setDraft(prev => {
-      const next = JSON.parse(JSON.stringify(prev));
       const keys = path.split('.');
+      const next = { ...prev } as any;
       let cur = next;
-      for (let i = 0; i < keys.length - 1; i++) cur = cur[keys[i]];
+      for (let i = 0; i < keys.length - 1; i++) {
+        cur[keys[i]] = { ...cur[keys[i]] };
+        cur = cur[keys[i]];
+      }
       cur[keys[keys.length - 1]] = value;
       return next;
     });
@@ -998,17 +980,71 @@ function DetailView({ lot, onSave, onBack, onDelete }) {
 
   const [uploadError, setUploadError] = useState('');
 
-  const handleImageUpload = (path) => async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (file.size > 2 * 1024 * 1024) {
-      setUploadError('이미지는 2MB 이하여야 합니다');
+  // path 예: 'qc.coomassie.intermediate.imageUrls'
+  const handleImageUpload = (path: string) => async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+    e.target.value = ''; // 같은 파일 재선택 허용
+
+    const oversized = files.find(f => f.size > 10 * 1024 * 1024);
+    if (oversized) {
+      setUploadError(`${oversized.name}: 10MB 이하 이미지만 업로드 가능합니다`);
       setTimeout(() => setUploadError(''), 3500);
       return;
     }
-    const reader = new FileReader();
-    reader.onload = (ev) => update(path, ev.target.result);
-    reader.readAsDataURL(file);
+
+    setUploadError(`⏳ ${files.length}개 업로드 중...`);
+
+    const lotId = draft.id;
+    const baseName = path.replace('.imageUrls', '').replace(/\./g, '_');
+    const uploadedUrls: string[] = [];
+
+    for (const file of files) {
+      const ext = file.name.split('.').pop() || 'png';
+      // 타임스탬프+난수로 파일명 충돌 방지
+      const storagePath = `${lotId}/${baseName}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.${ext}`;
+
+      const { error } = await supabase.storage
+        .from('qc-images')
+        .upload(storagePath, file, { upsert: true });
+
+      if (error) {
+        setUploadError(`업로드 실패: ${error.message}`);
+        setTimeout(() => setUploadError(''), 4000);
+        return;
+      }
+
+      const { data: { publicUrl } } = supabase.storage
+        .from('qc-images')
+        .getPublicUrl(storagePath);
+
+      uploadedUrls.push(publicUrl);
+    }
+
+    // 현재 배열에 추가 (setDraft 직접 사용해 최신 상태 읽기)
+    setDraft(prev => {
+      const keys = path.split('.');
+      const next = { ...prev } as any;
+      let cur = next;
+      for (let i = 0; i < keys.length - 1; i++) {
+        cur[keys[i]] = { ...cur[keys[i]] };
+        cur = cur[keys[i]];
+      }
+      const last = keys[keys.length - 1];
+      cur[last] = [...(Array.isArray(cur[last]) ? cur[last] : []), ...uploadedUrls];
+      return next;
+    });
+    setUploadError('');
+  };
+
+  // 특정 인덱스 이미지 제거 (Storage URL이면 파일도 삭제)
+  const handleImageRemove = async (path: string, currentUrls: string[], idx: number) => {
+    const url = currentUrls[idx];
+    if (url?.startsWith('https://') && url.includes('/qc-images/')) {
+      const storagePath = decodeURIComponent(url.split('/qc-images/')[1]?.split('?')[0] || '');
+      if (storagePath) await supabase.storage.from('qc-images').remove([storagePath]);
+    }
+    update(path, currentUrls.filter((_, i) => i !== idx));
   };
 
   const exportJSON = () => {
@@ -1273,7 +1309,7 @@ function DetailView({ lot, onSave, onBack, onDelete }) {
         {activeTab === 'purification' && <PurificationTab lot={draft} editing={editing} update={update} />}
         {activeTab === 'concentration' && <ConcentrationTab lot={draft} editing={editing} update={update} />}
         {activeTab === 'tev' && <TevTab lot={draft} editing={editing} update={update} />}
-        {activeTab === 'qc' && <QcTab lot={draft} editing={editing} update={update} handleImageUpload={handleImageUpload} />}
+        {activeTab === 'qc' && <QcTab lot={draft} editing={editing} update={update} handleImageUpload={handleImageUpload} handleImageRemove={handleImageRemove} />}
         {activeTab === 'storage' && <StorageTab lot={draft} editing={editing} update={update} />}
       </div>
 
@@ -1657,21 +1693,20 @@ function ConcentrationTab({ lot, editing, update }) {
   const c1 = lot.concentration.first;
   const c2 = lot.concentration.second;
 
-  // 1차 농축 자동 수율 계산
+  // 농축 수율 자동 계산 (1차·2차 공통)
   useEffect(() => {
-    if (editing && c1.nanodropConc_mg_mL && c1.finalVolume_mL) {
-      const y = (parseFloat(c1.nanodropConc_mg_mL) * parseFloat(c1.finalVolume_mL)).toFixed(3);
-      if (!isNaN(y) && y !== c1.totalYield_mg) update('concentration.first.totalYield_mg', y);
-    }
-  }, [c1.nanodropConc_mg_mL, c1.finalVolume_mL, editing]);
-
-  // 2차 농축 자동 수율 계산
-  useEffect(() => {
-    if (editing && c2.nanodropConc_mg_mL && c2.finalVolume_mL) {
-      const y = (parseFloat(c2.nanodropConc_mg_mL) * parseFloat(c2.finalVolume_mL)).toFixed(3);
-      if (!isNaN(y) && y !== c2.totalYield_mg) update('concentration.second.totalYield_mg', y);
-    }
-  }, [c2.nanodropConc_mg_mL, c2.finalVolume_mL, editing]);
+    if (!editing) return;
+    const calcYield = (key: string, c: typeof c1) => {
+      const conc = parseFloat(c.nanodropConc_mg_mL);
+      const vol = parseFloat(c.finalVolume_mL);
+      if (!isNaN(conc) && !isNaN(vol)) {
+        const y = (conc * vol).toFixed(3);
+        if (y !== c.totalYield_mg) update(`concentration.${key}.totalYield_mg`, y);
+      }
+    };
+    calcYield('first', c1);
+    calcYield('second', c2);
+  }, [c1.nanodropConc_mg_mL, c1.finalVolume_mL, c2.nanodropConc_mg_mL, c2.finalVolume_mL, editing]);
 
   return (
     <div>
@@ -1838,7 +1873,7 @@ function TevTab({ lot, editing, update }) {
   );
 }
 
-function QcTab({ lot, editing, update, handleImageUpload }) {
+function QcTab({ lot, editing, update, handleImageUpload, handleImageRemove }) {
   const [qcTab, setQcTab] = useState('coomassie');
   const qc = lot.qc;
 
@@ -1913,18 +1948,18 @@ function QcTab({ lot, editing, update, handleImageUpload }) {
         <SampleImageBox
           kind="intermediate"
           label="His-TEV FAM19A5 (중간체)"
-          imageDataUrl={data.intermediate?.imageDataUrl}
+          imageUrls={data.intermediate?.imageUrls || []}
           editing={editing}
-          onUpload={handleImageUpload(`${basePath}.intermediate.imageDataUrl`)}
-          onClear={() => update(`${basePath}.intermediate.imageDataUrl`, '')}
+          onUpload={handleImageUpload(`${basePath}.intermediate.imageUrls`)}
+          onRemove={(idx) => handleImageRemove(`${basePath}.intermediate.imageUrls`, data.intermediate?.imageUrls || [], idx)}
         />
         <SampleImageBox
           kind="final"
           label="rcFAM19A5 (최종 산물)"
-          imageDataUrl={data.final?.imageDataUrl}
+          imageUrls={data.final?.imageUrls || []}
           editing={editing}
-          onUpload={handleImageUpload(`${basePath}.final.imageDataUrl`)}
-          onClear={() => update(`${basePath}.final.imageDataUrl`, '')}
+          onUpload={handleImageUpload(`${basePath}.final.imageUrls`)}
+          onRemove={(idx) => handleImageRemove(`${basePath}.final.imageUrls`, data.final?.imageUrls || [], idx)}
         />
       </div>
 
@@ -1935,74 +1970,135 @@ function QcTab({ lot, editing, update, handleImageUpload }) {
   );
 }
 
-// Sample image box — colored container for one sample's image (intermediate vs final)
-function SampleImageBox({ kind, label, imageDataUrl, editing, onUpload, onClear }) {
+// Sample image box — 다중 이미지 캐러셀 (intermediate vs final)
+function SampleImageBox({ kind, label, imageUrls, editing, onUpload, onRemove }) {
+  const [idx, setIdx] = useState(0);
+
+  // 이미지가 삭제되어 idx가 범위를 벗어나면 보정
+  useEffect(() => {
+    if (idx >= imageUrls.length && imageUrls.length > 0) setIdx(imageUrls.length - 1);
+  }, [imageUrls.length]);
+
   const isInt = kind === 'intermediate';
-  const styles = isInt
+  const s = isInt
     ? { bg: 'linear-gradient(135deg, #faf5ff, #f5f3ff)', border: '#e9d5ff', tag: '#7c3aed', title: '#581c87' }
     : { bg: 'linear-gradient(135deg, #ecfeff, #cffafe)', border: '#a5f3fc', tag: '#0891b2', title: '#164e63' };
   const tagLabel = isInt ? '중간체' : '최종';
+  const total = imageUrls.length;
+  const hasPrev = idx > 0;
+  const hasNext = idx < total - 1;
+
+  const navBtn = (disabled: boolean, onClick: () => void, children: React.ReactNode) => (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      style={{
+        position: 'absolute', top: '50%', transform: 'translateY(-50%)',
+        width: 32, height: 32,
+        background: disabled ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.92)',
+        borderRadius: '50%',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+        color: disabled ? '#cbd5e1' : '#0f172a',
+        fontSize: 18, fontWeight: 700,
+        cursor: disabled ? 'default' : 'pointer',
+        zIndex: 2
+      }}
+    >{children}</button>
+  );
 
   return (
-    <div style={{
-      padding: 14,
-      background: styles.bg,
-      border: `1px solid ${styles.border}`,
-      borderRadius: 10
-    }}>
+    <div style={{ padding: 14, background: s.bg, border: `1px solid ${s.border}`, borderRadius: 10 }}>
+      {/* 헤더: 태그 + 제목 + 장수 카운터 */}
       <div style={{
         display: 'flex', alignItems: 'center', gap: 8,
         marginBottom: 10, paddingBottom: 8,
-        borderBottom: `1px solid ${styles.border}`
+        borderBottom: `1px solid ${s.border}`
       }}>
         <div style={{
-          padding: '2px 8px',
-          background: styles.tag, color: 'white',
-          borderRadius: 4, fontSize: 10, fontWeight: 700,
-          letterSpacing: '0.05em'
+          padding: '2px 8px', background: s.tag, color: 'white',
+          borderRadius: 4, fontSize: 10, fontWeight: 700, letterSpacing: '0.05em'
         }}>{tagLabel}</div>
-        <span style={{ fontSize: 13, fontWeight: 600, color: styles.title }}>{label}</span>
+        <span style={{ fontSize: 13, fontWeight: 600, color: s.title, flex: 1 }}>{label}</span>
+        {total > 0 && (
+          <span style={{
+            fontSize: 11, fontWeight: 700, color: s.tag,
+            background: 'rgba(255,255,255,0.7)', padding: '2px 8px', borderRadius: 10
+          }}>
+            {idx + 1} / {total}
+          </span>
+        )}
       </div>
 
-      {imageDataUrl ? (
+      {/* 이미지 뷰어 */}
+      {total > 0 ? (
         <div style={{ position: 'relative' }}>
           <img
-            src={imageDataUrl}
-            alt={label}
+            key={imageUrls[idx]}
+            src={imageUrls[idx]}
+            alt={`${label} ${idx + 1}`}
             style={{
-              width: '100%',
-              maxHeight: 340,
-              objectFit: 'contain',
-              borderRadius: 8,
-              border: '1px solid white',
-              background: 'white',
-              display: 'block'
+              width: '100%', maxHeight: 340, objectFit: 'contain',
+              borderRadius: 8, border: '1px solid white',
+              background: 'white', display: 'block'
             }}
           />
+
+          {/* 이전 버튼 */}
+          {total > 1 && (
+            <div style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)' }}>
+              {navBtn(!hasPrev, () => setIdx(i => i - 1), <ChevronLeft size={18} />)}
+            </div>
+          )}
+          {/* 다음 버튼 */}
+          {total > 1 && (
+            <div style={{ position: 'absolute', right: editing ? 52 : 8, top: '50%', transform: 'translateY(-50%)' }}>
+              {navBtn(!hasNext, () => setIdx(i => i + 1), <ChevronRight size={18} />)}
+            </div>
+          )}
+
+          {/* 현재 이미지 삭제 */}
           {editing && (
             <button
-              onClick={onClear}
+              onClick={() => onRemove(idx)}
               style={{
                 position: 'absolute', top: 8, right: 8,
-                background: 'rgba(239,68,68,0.95)', color: 'white',
-                padding: '6px 10px', borderRadius: 6, fontSize: 11, fontWeight: 600,
-                display: 'flex', alignItems: 'center', gap: 4
+                background: 'rgba(239,68,68,0.92)', color: 'white',
+                padding: '5px 9px', borderRadius: 6, fontSize: 11, fontWeight: 600,
+                display: 'flex', alignItems: 'center', gap: 3
               }}
             >
               <Trash2 size={11} /> 삭제
             </button>
           )}
+
+          {/* 닷 인디케이터 (5장 이하일 때) */}
+          {total > 1 && total <= 5 && (
+            <div style={{
+              position: 'absolute', bottom: 8, left: '50%', transform: 'translateX(-50%)',
+              display: 'flex', gap: 5
+            }}>
+              {imageUrls.map((_, i) => (
+                <button
+                  key={i}
+                  onClick={() => setIdx(i)}
+                  style={{
+                    width: i === idx ? 16 : 7, height: 7,
+                    borderRadius: 4,
+                    background: i === idx ? s.tag : 'rgba(255,255,255,0.7)',
+                    transition: 'all 0.2s',
+                    padding: 0
+                  }}
+                />
+              ))}
+            </div>
+          )}
         </div>
       ) : (
         <div style={{
-          padding: 24,
-          border: `2px dashed ${styles.border}`,
-          borderRadius: 8,
-          textAlign: 'center',
-          color: styles.tag,
-          background: 'rgba(255,255,255,0.5)',
-          minHeight: 140,
-          display: 'flex', flexDirection: 'column',
+          padding: 24, border: `2px dashed ${s.border}`, borderRadius: 8,
+          textAlign: 'center', color: s.tag, background: 'rgba(255,255,255,0.5)',
+          minHeight: 140, display: 'flex', flexDirection: 'column',
           alignItems: 'center', justifyContent: 'center', gap: 6
         }}>
           <ImageIcon size={28} style={{ opacity: 0.6 }} />
@@ -2012,16 +2108,23 @@ function SampleImageBox({ kind, label, imageDataUrl, editing, onUpload, onClear 
         </div>
       )}
 
+      {/* 업로드 버튼 (편집 모드) */}
       {editing && (
-        <label style={{
-          display: 'inline-flex', alignItems: 'center', gap: 6,
-          marginTop: 10, padding: '7px 12px',
-          background: styles.tag, color: 'white', fontSize: 12,
-          borderRadius: 7, cursor: 'pointer', fontWeight: 500
-        }}>
-          <Upload size={12} /> 이미지 {imageDataUrl ? '교체' : '업로드'}
-          <input type="file" accept="image/*" onChange={onUpload} style={{ display: 'none' }} />
-        </label>
+        <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <label style={{
+            display: 'inline-flex', alignItems: 'center', gap: 6,
+            padding: '7px 12px', background: s.tag, color: 'white',
+            fontSize: 12, borderRadius: 7, cursor: 'pointer', fontWeight: 500
+          }}>
+            <Upload size={12} /> {total > 0 ? '추가 업로드' : '이미지 업로드'}
+            <input type="file" accept="image/*" multiple onChange={onUpload} style={{ display: 'none' }} />
+          </label>
+          {total > 0 && (
+            <span style={{ fontSize: 11, color: s.title, opacity: 0.7 }}>
+              여러 장 동시 선택 가능
+            </span>
+          )}
+        </div>
       )}
     </div>
   );
@@ -2150,92 +2253,6 @@ function TextArea({ val, edit, on }) {
   return edit
     ? <textarea value={val || ''} onChange={e => on(e.target.value)} rows={3} style={{ ...inputStyle, resize: 'vertical', fontFamily: 'inherit' }} />
     : <ReadOnly>{val}</ReadOnly>;
-}
-function ResultSelect({ val, edit, on }) {
-  if (!edit) {
-    if (!val) return <ReadOnly>—</ReadOnly>;
-    const color = val === 'Pass' ? '#22c55e' : val === 'Fail' ? '#ef4444' : '#f59e0b';
-    const bg = val === 'Pass' ? '#dcfce7' : val === 'Fail' ? '#fee2e2' : '#fef3c7';
-    return (
-      <div style={{
-        padding: '10px 12px', background: bg, color, fontWeight: 600, fontSize: 14,
-        borderRadius: 8, display: 'inline-block'
-      }}>{val}</div>
-    );
-  }
-  return (
-    <select value={val || ''} onChange={e => on(e.target.value)} style={inputStyle}>
-      <option value="">— 선택 —</option>
-      <option>Pass</option>
-      <option>Fail</option>
-      <option>Pending</option>
-    </select>
-  );
-}
-
-function ImageUploadField({ label, imageDataUrl, editing, onUpload, onClear }) {
-  return (
-    <div style={{ marginBottom: 16, marginTop: 8 }}>
-      <label style={{
-        display: 'block', fontSize: 12, fontWeight: 600, color: '#475569', marginBottom: 8
-      }}>
-        {label}
-      </label>
-      {imageDataUrl ? (
-        <div style={{ position: 'relative', display: 'inline-block', maxWidth: '100%' }}>
-          <img
-            src={imageDataUrl}
-            alt={label}
-            style={{
-              maxWidth: '100%',
-              maxHeight: 400,
-              borderRadius: 10,
-              border: '1px solid #e2e8f0',
-              display: 'block'
-            }}
-          />
-          {editing && (
-            <button
-              onClick={onClear}
-              style={{
-                position: 'absolute', top: 8, right: 8,
-                background: 'rgba(239,68,68,0.95)', color: 'white',
-                padding: '6px 10px', borderRadius: 6, fontSize: 12, fontWeight: 600,
-                display: 'flex', alignItems: 'center', gap: 4
-              }}
-            >
-              <Trash2 size={12} /> 삭제
-            </button>
-          )}
-        </div>
-      ) : (
-        <div style={{
-          padding: 24,
-          border: '2px dashed #cbd5e1',
-          borderRadius: 10,
-          textAlign: 'center',
-          color: '#94a3b8',
-          background: '#f8fafc'
-        }}>
-          <ImageIcon size={28} style={{ marginBottom: 6 }} />
-          <div style={{ fontSize: 13 }}>
-            {editing ? '이미지를 업로드하세요 (최대 2MB)' : '업로드된 이미지가 없습니다'}
-          </div>
-        </div>
-      )}
-      {editing && (
-        <label style={{
-          display: 'inline-flex', alignItems: 'center', gap: 6,
-          marginTop: 10, padding: '8px 14px',
-          background: '#0f172a', color: 'white', fontSize: 13,
-          borderRadius: 8, cursor: 'pointer', fontWeight: 500
-        }}>
-          <Upload size={14} /> 이미지 {imageDataUrl ? '교체' : '업로드'}
-          <input type="file" accept="image/*" onChange={onUpload} style={{ display: 'none' }} />
-        </label>
-      )}
-    </div>
-  );
 }
 
 // ============== Styles ==============
