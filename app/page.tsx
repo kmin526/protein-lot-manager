@@ -113,25 +113,29 @@ const newLotTemplate = (tempId = '') => ({
   // 5) QC tests — 각 항목마다 중간체(His-TEV FAM19A5)와 최종(rcFAM19A5) 이미지 각각 업로드
   qc: {
     coomassie: {
-      date: '',
+      intermediateDate: '',
+      finalDate: '',
       notes: '',
       intermediate: { imageUrls: [] as string[] },
       final:        { imageUrls: [] as string[] }
     },
     westernBlot: {
-      date: '',
+      intermediateDate: '',
+      finalDate: '',
       notes: '',
       intermediate: { imageUrls: [] as string[] },
       final:        { imageUrls: [] as string[] }
     },
     concentrationQC: {
-      date: '',
+      intermediateDate: '',
+      finalDate: '',
       notes: '',
       intermediate: { imageUrls: [] as string[] },
       final:        { imageUrls: [] as string[] }
     },
     elisa: {
-      date: '',
+      intermediateDate: '',
+      finalDate: '',
       notes: '',
       intermediate: { imageUrls: [] as string[] },
       final:        { imageUrls: [] as string[] }
@@ -155,8 +159,8 @@ const STAGES = [
   { key: 'conc1',        label: '1차 농축',            auto: (l: any) => !!(l.concentration?.first?.endDate || l.concentration?.first?.startDate) },
   { key: 'tevCleavage',  label: 'TEV Cleavage',       auto: (l: any) => !!l.tevCleavage?.date },
   { key: 'conc2',        label: '2차 농축',            auto: (l: any) => !!(l.concentration?.second?.endDate || l.concentration?.second?.startDate) },
-  { key: 'qcBasic',      label: 'QC (Coomassie/WB)', auto: (l: any) => !!(l.qc?.coomassie?.date || l.qc?.westernBlot?.date) },
-  { key: 'qcElisa',      label: 'ELISA 분석',          auto: (l: any) => !!l.qc?.elisa?.date },
+  { key: 'qcBasic',      label: 'QC (Coomassie/WB)', auto: (l: any) => !!(l.qc?.coomassie?.intermediateDate || l.qc?.coomassie?.finalDate || l.qc?.coomassie?.date || l.qc?.westernBlot?.intermediateDate || l.qc?.westernBlot?.finalDate || l.qc?.westernBlot?.date) },
+  { key: 'qcElisa',      label: 'ELISA 분석',          auto: (l: any) => !!(l.qc?.elisa?.intermediateDate || l.qc?.elisa?.finalDate || l.qc?.elisa?.date) },
 ];
 
 // stagesDone[key]: true/false = 수동 고정, null/undefined = 날짜 데이터로 자동 감지
@@ -242,8 +246,10 @@ function migrateLot(lot) {
 
     const migrateQcEntry = (entry: any, altDate?: string, altFinal?: string) => {
       if (!entry) return entry;
+      const legacyDate = (altDate && entry[altDate]) || entry.date || '';
       return {
-        date: (altDate && entry[altDate]) || entry.date || '',
+        intermediateDate: entry.intermediateDate ?? legacyDate,
+        finalDate:        entry.finalDate        ?? legacyDate,
         notes: entry.notes || '',
         intermediate: { imageUrls: toUrlArray(entry.intermediate) },
         final:        { imageUrls: toUrlArray(entry.final, altFinal, entry) }
@@ -2017,33 +2023,39 @@ function QcTab({ lot, editing, update, handleImageUpload, handleImageRemove }) {
         ))}
       </div>
 
-      <FormField label="분석 날짜">
-        <DateInput val={data.date} edit={editing} on={v => update(`${basePath}.date`, v)} />
-      </FormField>
-
       <div style={{
         display: 'grid',
         gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
         gap: 14,
-        marginTop: 16,
+        marginTop: 4,
         marginBottom: 16
       }}>
-        <SampleImageBox
-          kind="intermediate"
-          label="His-TEV FAM19A5 (중간체)"
-          imageUrls={data.intermediate?.imageUrls || []}
-          editing={editing}
-          onUpload={handleImageUpload(`${basePath}.intermediate.imageUrls`)}
-          onRemove={(idx) => handleImageRemove(`${basePath}.intermediate.imageUrls`, data.intermediate?.imageUrls || [], idx)}
-        />
-        <SampleImageBox
-          kind="final"
-          label="rcFAM19A5 (최종 산물)"
-          imageUrls={data.final?.imageUrls || []}
-          editing={editing}
-          onUpload={handleImageUpload(`${basePath}.final.imageUrls`)}
-          onRemove={(idx) => handleImageRemove(`${basePath}.final.imageUrls`, data.final?.imageUrls || [], idx)}
-        />
+        <div>
+          <FormField label="His-TEV FAM19A5 분석 날짜">
+            <DateInput val={data.intermediateDate} edit={editing} on={v => update(`${basePath}.intermediateDate`, v)} />
+          </FormField>
+          <SampleImageBox
+            kind="intermediate"
+            label="His-TEV FAM19A5 (중간체)"
+            imageUrls={data.intermediate?.imageUrls || []}
+            editing={editing}
+            onUpload={handleImageUpload(`${basePath}.intermediate.imageUrls`)}
+            onRemove={(idx) => handleImageRemove(`${basePath}.intermediate.imageUrls`, data.intermediate?.imageUrls || [], idx)}
+          />
+        </div>
+        <div>
+          <FormField label="rcFAM19A5 분석 날짜">
+            <DateInput val={data.finalDate} edit={editing} on={v => update(`${basePath}.finalDate`, v)} />
+          </FormField>
+          <SampleImageBox
+            kind="final"
+            label="rcFAM19A5 (최종 산물)"
+            imageUrls={data.final?.imageUrls || []}
+            editing={editing}
+            onUpload={handleImageUpload(`${basePath}.final.imageUrls`)}
+            onRemove={(idx) => handleImageRemove(`${basePath}.final.imageUrls`, data.final?.imageUrls || [], idx)}
+          />
+        </div>
       </div>
 
       <FormField label="비고">
